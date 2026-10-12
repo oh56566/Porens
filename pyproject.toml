@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "porens"
+version = "0.1.0"
+description = "Android media recovery and PC-side forensic file carving"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["forensics", "data-recovery", "file-carving", "android", "jpeg"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Recovery Tools",
+    "Topic :: Security",
+]
+
+# Porens is intentionally dependency-free: it relies only on the standard
+# library so it runs on a locked-down examiner's workstation.
+dependencies = []
+
+[project.scripts]
+porens = "porens.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools]
+packages = ["porens", "porens.formats"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
