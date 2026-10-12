@@ -35,6 +35,9 @@ class Recovered:
     out_path: str
     exif: ExifData = field(default_factory=ExifData)
     notes: list[str] = field(default_factory=list)
+    source: str = "carve"            # "carve" | "fat" | "exfat"
+    original_name: str | None = None  # filename from the directory entry
+    fs_path: str | None = None        # directory path on the volume
 
 
 def _read_region(src: Source, res: CarveResult) -> bytes:
@@ -108,3 +111,111 @@ def recover_to_dir(
             if on_status is not None and index % 50 == 0:
                 on_status(f"recovered {index} files so far...")
             yield rec
+
+
+def _detect_kind(head: bytes) -> tuple[str, str] | None:
+    """Return ``(kind, ext)`` if ``head`` starts with a known signature."""
+    from .signatures import COMBINED, kind_for_match
+
+    ext_map = {"jpeg": "jpg", "png": "png", "gif": "gif", "webp": "webp",
+               "isobmff": "mp4", "tiff": "tif"}
+    # ISO base media files carry "ftyp" at offset 4, not 0.
+    if head[4:8] == b"ftyp":
+        return "isobmff", "mp4"
+    m = COMBINED.match(head)
+    if not m:
+        return None
+    kind, _ = kind_for_match(m)
+    return kind, ext_map.get(kind, "bin")
+
+
+def _sanitize(name: str) -> str:
+    keep = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in name)
+    return keep.strip() or "unnamed"
+
+
+def recover_filesystem_to_dir(
+    image_path: str,
+    out_dir: str,
+    deleted_only: bool = True,
+    dedupe: bool = True,
+    extract_exif: bool = True,
+) -> Iterator[Recovered]:
+    """Recover (deleted) files via FAT/exFAT directory entries.
+
+    Unlike carving, this yields the file's original name, exact size and a
+    directory path, read from the filesystem's own metadata. Falls back to
+    nothing if the image holds no recognizable FAT/exFAT volume (use
+    :func:`recover_to_dir` to carve in that case).
+    """
+
+    from .filesystems import exfat, fat, mbr
+
+    os.makedirs(out_dir, exist_ok=True)
+    seen_hashes: set[str] = set()
+    index = 0
+
+    with open_source(image_path) as src:
+        def read_at(off: int, length: int) -> bytes:
+            return src.mm[off : off + length]
+
+        volumes = mbr.find_volumes(read_at, src.size)
+        for vi, vol in enumerate(volumes):
+            boot = read_at(vol.offset, 512)
+            fat_params = fat.parse_bpb(boot, vol.offset)
+            exfat_params = exfat.parse_boot(boot, vol.offset)
+
+            if exfat_params is not None:
+                _, files = exfat.recover_volume(read_at, src.size, vol, deleted_only)
+                reader = lambda f: exfat.read_file_bytes(read_at, exfat_params, f)
+                src_kind = "exfat"
+            elif fat_params is not None:
+                _, files = fat.recover_volume(read_at, src.size, vol, deleted_only)
+                reader = lambda f: fat.read_file_bytes(read_at, fat_params, f)
+                src_kind = "fat"
+            else:
+                continue
+
+            for f in files:
+                data = reader(f)
+                if not data:
+                    continue
+                digest = hashlib.sha256(data).hexdigest()
+                if dedupe and digest in seen_hashes:
+                    continue
+                seen_hashes.add(digest)
+
+                det = _detect_kind(data[:32])
+                name_ext = (f.name.rsplit(".", 1)[-1].lower()
+                            if "." in f.name else "")
+                if det:
+                    kind, ext = det
+                    magic_ok = (ext == name_ext) or (ext == "jpg" and name_ext in ("jpg", "jpeg"))
+                    conf = 0.95 if magic_ok else 0.8
+                else:
+                    kind, ext = ("file", name_ext or "bin")
+                    conf = 0.55
+                best_effort = "fat-chain(best-effort)" in f.notes
+                if best_effort:
+                    conf *= 0.7
+
+                exif = ExifData()
+                if extract_exif and kind == "jpeg":
+                    exif = parse_exif(data)
+
+                out_name = f"{index:06d}_{_sanitize(f.name)}"
+                out_path = os.path.join(out_dir, out_name)
+                with open(out_path, "wb") as fh:
+                    fh.write(data)
+
+                rec = Recovered(
+                    index=index, kind=kind, ext=ext,
+                    source_offset=f.data_offset, size=len(data),
+                    confidence=round(conf, 3),
+                    truncated=best_effort, sha256=digest, out_path=out_path,
+                    exif=exif, notes=list(f.notes),
+                    source=src_kind, original_name=f.name,
+                    fs_path=(f.path or None),
+                )
+                index += 1
+                yield rec

@@ -27,7 +27,7 @@ porens = "porens.cli:main"
 test = ["pytest>=7"]
 
 [tool.setuptools]
-packages = ["porens", "porens.formats"]
+packages = ["porens", "porens.formats", "porens.filesystems"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

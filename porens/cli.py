@@ -44,7 +44,6 @@ def _progress_printer():
 
 def _cmd_carve(args: argparse.Namespace) -> int:
     from .recover import recover_to_dir
-    from .report import write_manifest
 
     kinds = _parse_kinds(args.types)
     progress = None if args.quiet else _progress_printer()
@@ -60,16 +59,25 @@ def _cmd_carve(args: argparse.Namespace) -> int:
         on_progress=progress,
     ):
         records.append(rec)
-    stats = write_manifest(records, args.out)
-    _print_summary(stats)
+    _finish(records, args.out, make_html=not args.no_html, title="Porens carve", embed=args.embed)
     return 0
+
+
+def _finish(records, out_dir: str, make_html: bool, title: str,
+            embed: bool = False) -> None:
+    from .report import write_html_gallery, write_manifest
+
+    stats = write_manifest(records, out_dir)
+    _print_summary(stats)
+    if make_html and records:
+        gallery = write_html_gallery(records, out_dir, title=title, embed=embed)
+        print(f"gallery         : {gallery}")
 
 
 def _cmd_thumbnails(args: argparse.Namespace) -> int:
     import os
 
     from .recover import recover_to_dir
-    from .report import write_manifest
     from .thumbnails import find_thumb_stores
 
     stores: list[str]
@@ -100,8 +108,31 @@ def _cmd_thumbnails(args: argparse.Namespace) -> int:
     # Re-index sequentially across stores.
     for i, rec in enumerate(all_records):
         rec.index = i
-    stats = write_manifest(all_records, args.out)
-    _print_summary(stats)
+    _finish(all_records, args.out, make_html=not args.no_html, title="Porens thumbnails", embed=args.embed)
+    return 0
+
+
+def _cmd_fs(args: argparse.Namespace) -> int:
+    from .recover import recover_filesystem_to_dir
+
+    print(f"Filesystem recovery on {args.image} -> {args.out}", file=sys.stderr)
+    records = list(
+        recover_filesystem_to_dir(
+            args.image,
+            args.out,
+            deleted_only=not args.include_live,
+            dedupe=not args.no_dedupe,
+        )
+    )
+    if not records:
+        print("No FAT/exFAT volume with recoverable entries found. "
+              "Try `porens carve` to signature-carve instead.", file=sys.stderr)
+    # Show a few recovered names — the headline feature of FS recovery.
+    for r in records[:10]:
+        loc = f"{r.fs_path}/" if r.fs_path else ""
+        print(f"  {r.source}: {loc}{r.original_name}  ({r.size} B, conf {r.confidence})",
+              file=sys.stderr)
+    _finish(records, args.out, make_html=not args.no_html, title="Porens filesystem recovery", embed=args.embed)
     return 0
 
 
@@ -176,6 +207,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-exif", action="store_true",
                    help="skip EXIF metadata extraction")
     c.add_argument("--quiet", action="store_true", help="no progress bar")
+    c.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
+    c.add_argument("--embed", action="store_true",
+                   help="inline media into the gallery as data URIs (portable, larger)")
     c.set_defaults(func=_cmd_carve)
 
     t = sub.add_parser("thumbnails",
@@ -184,7 +218,22 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("-o", "--out", required=True, help="output directory")
     t.add_argument("--min-size", type=int, default=256)
     t.add_argument("--no-dedupe", action="store_true")
+    t.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
+    t.add_argument("--embed", action="store_true",
+                   help="inline media into the gallery as data URIs (portable, larger)")
     t.set_defaults(func=_cmd_thumbnails)
+
+    f = sub.add_parser("fs",
+                       help="recover deleted files via FAT/exFAT directory entries")
+    f.add_argument("image", help="path to SD-card image or /dev/sdX")
+    f.add_argument("-o", "--out", required=True, help="output directory")
+    f.add_argument("--include-live", action="store_true",
+                   help="also extract files that are not deleted")
+    f.add_argument("--no-dedupe", action="store_true")
+    f.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
+    f.add_argument("--embed", action="store_true",
+                   help="inline media into the gallery as data URIs (portable, larger)")
+    f.set_defaults(func=_cmd_fs)
 
     a = sub.add_parser("acquire", help="pull media/thumbnails over ADB, or guide")
     a.add_argument("--pull", metavar="DIR", help="adb-pull media+thumbnails here")

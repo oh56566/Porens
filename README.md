@@ -2,12 +2,15 @@
 
 **Android media recovery & PC-side forensic file carving.**
 
-Porens recovers deleted photos and videos by *structure-aware file carving*:
-it scans a disk image, SD-card image, raw device, or Android thumbnail store
-for file signatures, then walks each file format's real container to
-reconstruct the file close to its original bytes — not just the first chunk.
-It runs on your own PC with only the Python standard library, so it works on a
-locked-down examiner's workstation with no third-party dependencies.
+Porens recovers deleted photos and videos two ways — *filesystem-aware
+recovery* (FAT/exFAT directory entries, which also restores the original
+name, path, size and timestamps) and *structure-aware file carving* (walking
+each format's real container to reconstruct the file close to its original
+bytes, not just the first chunk). It works on a disk image, SD-card image,
+raw device, or Android thumbnail store, produces a reviewable HTML gallery,
+and runs on your own PC with only the Python standard library — no
+third-party dependencies, so it works on a locked-down examiner's
+workstation.
 
 > Porens is for recovering data from **devices and media you own or are
 > authorized to examine**. It performs no rooting, no encryption bypass, and
@@ -74,7 +77,20 @@ porens acquire --pull ./pulled/ # ADB-pull photo folders + gallery thumbnails
 For an SD card, image it with `dd` on the PC (the guide shows how to identify
 the right device safely) — **never write to the source**.
 
-### 2. Carve a disk / SD-card image
+### 2. Recover deleted files from an SD card — try the filesystem first
+
+```bash
+porens fs sdcard.img -o recovered/     # FAT/exFAT deleted-entry recovery
+porens fs /dev/sdX   -o recovered/      # raw device (read-only)
+```
+
+This reads the filesystem's own directory entries, so it restores each
+deleted file's **original name, directory path, exact size and timestamps**
+— e.g. `DCIM/Camera/Beach Sunset 2017.jpg`. It handles FAT12/16/32 (long
+filenames rebuilt from LFN entries) and exFAT (contiguous `NoFatChain`
+files recover exactly), walking subdirectories and MBR partitions.
+
+### 3. Carve a disk / SD-card image (when there is no intact filesystem)
 
 ```bash
 porens carve sdcard.img -o recovered/
@@ -82,17 +98,29 @@ porens carve /dev/sdX   -o recovered/          # raw device (read-only)
 porens carve phone.img  -o recovered/ --types jpeg,heic
 ```
 
-### 3. Carve surviving thumbnails
+Run `fs` and `carve` both for best coverage: `fs` gets named files from
+intact directories; `carve` finds files whose directory entry is already
+gone.
+
+### 4. Carve surviving thumbnails
 
 ```bash
 porens thumbnails ./pulled/ -o recovered-thumbs/     # walks for .thumbdata*
 porens thumbnails .thumbdata3--1967290299 -o out/    # a single store
 ```
 
-Each run writes the recovered files plus `manifest.json` and `manifest.csv`
-describing every file: source offset, size, reconstruction confidence,
-truncation flag, SHA-256, and (for JPEGs) EXIF timestamp, camera make/model,
-and GPS. JPEGs are named with their capture date when EXIF carries one, e.g.
+### Output
+
+Each run writes the recovered files plus `manifest.json`, `manifest.csv`,
+and a **`gallery.html`** you can open to review results — a responsive,
+light/dark gallery with thumbnails, confidence badges, EXIF date/camera, a
+GPS map link, and filter/sort controls. Use `--embed` for a single portable
+HTML file (media inlined as data URIs), or `--no-html` to skip it.
+
+The manifest describes every file: source offset, size, reconstruction
+confidence, truncation flag, SHA-256, original name/path (for `fs`), and
+(for JPEGs) EXIF timestamp, camera make/model and GPS. Carved JPEGs are
+named with their capture date when EXIF carries one, e.g.
 `000000_jpeg_20170821_134502.jpg`.
 
 ---
@@ -143,12 +171,13 @@ porens/
   signatures.py   start-of-file signatures + one combined scan regex
   carve.py        mmap source, window-scan for signatures, dispatch carvers
   formats/        structure-aware carvers (jpeg, png, isobmff, gif/webp/tiff)
+  filesystems/    FAT12/16/32 + exFAT deleted-entry recovery, MBR parsing
   exif_meta.py    dependency-free EXIF reader (date, camera, GPS)
   thumbnails.py   find & carve Android .thumbdata stores
-  recover.py      carve -> write files -> dedupe -> collect metadata
-  report.py       JSON + CSV manifests
+  recover.py      carve / fs -> write files -> dedupe -> collect metadata
+  report.py       JSON + CSV manifests + HTML gallery
   acquire.py      ADB pull + dd imaging guidance (no rooting, no bypass)
-  cli.py          `porens carve | thumbnails | acquire`
+  cli.py          `porens fs | carve | thumbnails | acquire`
 ```
 
 Run the tests with `pytest`. They build real (synthetic) images, scatter them
@@ -162,6 +191,11 @@ trap and false-positive rejection.
 - Cannot decrypt FBE/FDE-encrypted data. Ciphertext in, ciphertext out.
 - Cannot recover blocks the flash controller has already TRIMmed/erased.
 - Fragmented files (non-contiguous on disk) are recovered only up to the first
-  fragment boundary; signature-carving assumes contiguity. This is a property
-  of carving in general, not a bug.
+  fragment boundary; both carving and the deleted-entry recovery assume the
+  file was stored contiguously (the usual case for write-once photos). A
+  property of recovery from freed metadata, not a bug.
+- A FAT file that had only a short (8.3) name loses its first character on
+  deletion — the filesystem overwrites it with `0xE5`. Porens recovers the
+  content exactly and marks the lost character with `_`. Files with a long
+  filename recover their name in full.
 - It will not root your phone or unlock your bootloader, by design.
