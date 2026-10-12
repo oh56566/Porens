@@ -123,3 +123,33 @@ def test_exfat_deleted_recovery(tmp_path):
 def test_bpb_parser_rejects_garbage():
     assert fat.parse_bpb(b"\x00" * 512, 0) is None
     assert exfat.parse_boot(b"\x00" * 512, 0) is None
+
+
+@pytest.mark.skipif(not HAVE_VFAT, reason="mkfs.vfat/mtools not available")
+def test_recover_all_and_info(tmp_path):
+    from porens.recover import recover_all
+    from porens.triage import inspect_image
+
+    (pa, a), (pb, b) = _payloads(tmp_path)
+    img = os.path.join(tmp_path, "mix.img")
+    subprocess.run(["truncate", "-s", "64M", img], check=True)
+    subprocess.run(["mkfs.vfat", "-F", "32", img],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["mcopy", "-i", img, pa, "::/gone.jpg"], check=True)
+    subprocess.run(["mcopy", "-i", img, pb, "::/kept.png"], check=True)
+    subprocess.run(["mdel", "-i", img, "::/gone.jpg"], check=True)  # delete one
+
+    # Triage sees the FAT volume and the surviving deleted entry.
+    rep = inspect_image(img, sample_mb=64)
+    assert rep.volumes and rep.volumes[0].fs == "fat32"
+    assert rep.volumes[0].deleted_files >= 1
+
+    # Full recovery: deleted file via fat, the live one via carve, no dupes.
+    out = os.path.join(tmp_path, "out")
+    recs = list(recover_all(img, out, min_size=8))
+    contents = {open(r.out_path, "rb").read() for r in recs}
+    assert a in contents       # deleted jpg recovered
+    assert b in contents       # live png found by carving
+    hashes = [r.sha256 for r in recs]
+    assert len(hashes) == len(set(hashes))   # cross-pass dedupe held
+    assert {r.index for r in recs} == set(range(len(recs)))  # unique indices

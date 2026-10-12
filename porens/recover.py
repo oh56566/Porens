@@ -63,17 +63,22 @@ def recover_to_dir(
     extract_exif: bool = True,
     on_status: StatusFn | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    seen_hashes: set[str] | None = None,
+    start_index: int = 0,
 ) -> Iterator[Recovered]:
     """Carve ``image_path`` and write recovered files into ``out_dir``.
 
     Yields a :class:`Recovered` per written file. Exact-duplicate files
     (same SHA-256) are skipped when ``dedupe`` is set — flash images and
-    thumbnail stores are full of repeats.
+    thumbnail stores are full of repeats. Pass ``seen_hashes`` and
+    ``start_index`` to chain this after another recovery pass into the same
+    directory without duplicate files or clashing indices.
     """
 
     os.makedirs(out_dir, exist_ok=True)
-    seen_hashes: set[str] = set()
-    index = 0
+    if seen_hashes is None:
+        seen_hashes = set()
+    index = start_index
 
     with open_source(image_path) as src:
         for res in carve_source(
@@ -140,6 +145,8 @@ def recover_filesystem_to_dir(
     deleted_only: bool = True,
     dedupe: bool = True,
     extract_exif: bool = True,
+    seen_hashes: set[str] | None = None,
+    start_index: int = 0,
 ) -> Iterator[Recovered]:
     """Recover (deleted) files via FAT/exFAT directory entries.
 
@@ -152,8 +159,9 @@ def recover_filesystem_to_dir(
     from .filesystems import exfat, fat, mbr
 
     os.makedirs(out_dir, exist_ok=True)
-    seen_hashes: set[str] = set()
-    index = 0
+    if seen_hashes is None:
+        seen_hashes = set()
+    index = start_index
 
     with open_source(image_path) as src:
         def read_at(off: int, length: int) -> bytes:
@@ -219,3 +227,34 @@ def recover_filesystem_to_dir(
                 )
                 index += 1
                 yield rec
+
+
+def recover_all(
+    image_path: str,
+    out_dir: str,
+    min_size: int = 512,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> Iterator[Recovered]:
+    """Do the whole job: filesystem recovery first, then carve the rest.
+
+    Filesystem recovery runs first because it yields named, exactly-sized
+    files; carving then sweeps the same image for anything whose directory
+    entry is gone. A shared SHA-256 set means a file reachable both ways is
+    written once (keeping the filesystem copy, with its name and metadata),
+    and indices stay unique across both passes.
+    """
+
+    seen: set[str] = set()
+    idx = 0
+    for rec in recover_filesystem_to_dir(
+        image_path, out_dir, deleted_only=True, dedupe=True,
+        seen_hashes=seen, start_index=idx,
+    ):
+        idx = rec.index + 1
+        yield rec
+    for rec in recover_to_dir(
+        image_path, out_dir, min_size=min_size, dedupe=True,
+        seen_hashes=seen, start_index=idx, on_progress=on_progress,
+    ):
+        idx = rec.index + 1
+        yield rec

@@ -67,6 +67,18 @@ Android **platform-tools** (`adb`) on your PATH.
 
 ## Quick start
 
+### 0. The short version
+
+```bash
+porens acquire --guide          # how to get the bytes off the device safely
+porens info  sdcard.img         # read-only triage: what's here, what to run
+porens recover sdcard.img -o recovered/   # do everything (fs + carve), one gallery
+```
+
+`recover` runs filesystem recovery and carving in one pass and writes a
+`gallery.html` you can open. The steps below are the individual tools it
+builds on.
+
 ### 1. Acquire (get the bytes onto your PC)
 
 ```bash
@@ -76,6 +88,10 @@ porens acquire --pull ./pulled/ # ADB-pull photo folders + gallery thumbnails
 
 For an SD card, image it with `dd` on the PC (the guide shows how to identify
 the right device safely) — **never write to the source**.
+
+Not sure what you're holding? `porens info <image>` reports the partition
+table, any FAT/exFAT volumes, how many deleted directory entries survive,
+and a quick signature sample — then recommends an approach. It only reads.
 
 ### 2. Recover deleted files from an SD card — try the filesystem first
 
@@ -174,10 +190,11 @@ porens/
   filesystems/    FAT12/16/32 + exFAT deleted-entry recovery, MBR parsing
   exif_meta.py    dependency-free EXIF reader (date, camera, GPS)
   thumbnails.py   find & carve Android .thumbdata stores
-  recover.py      carve / fs -> write files -> dedupe -> collect metadata
+  recover.py      carve / fs / recover_all -> write, dedupe, collect metadata
+  triage.py       read-only `info`: partitions, filesystems, recommendation
   report.py       JSON + CSV manifests + HTML gallery
   acquire.py      ADB pull + dd imaging guidance (no rooting, no bypass)
-  cli.py          `porens fs | carve | thumbnails | acquire`
+  cli.py          `porens recover | fs | carve | thumbnails | info | acquire`
 ```
 
 Run the tests with `pytest`. They build real (synthetic) images, scatter them

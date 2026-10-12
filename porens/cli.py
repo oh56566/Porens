@@ -136,6 +136,47 @@ def _cmd_fs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_recover(args: argparse.Namespace) -> int:
+    from .recover import recover_all
+
+    progress = None if args.quiet else _progress_printer()
+    print(f"Full recovery (filesystem + carve) on {args.image} -> {args.out}",
+          file=sys.stderr)
+    records = list(recover_all(args.image, args.out, min_size=args.min_size,
+                               on_progress=progress))
+    by_source: dict[str, int] = {}
+    for r in records:
+        by_source[r.source] = by_source.get(r.source, 0) + 1
+    _finish(records, args.out, make_html=not args.no_html,
+            title="Porens full recovery", embed=args.embed)
+    if by_source:
+        print("  by source     : "
+              + ", ".join(f"{k}={v}" for k, v in sorted(by_source.items())))
+    return 0
+
+
+def _cmd_info(args: argparse.Namespace) -> int:
+    from .triage import inspect_image
+
+    rep = inspect_image(args.image, sample_mb=args.sample_mb)
+    gib = rep.size / (1024 ** 3)
+    print(f"\n=== Porens triage: {rep.path} ===")
+    print(f"size            : {rep.size:,} bytes ({gib:.2f} GiB)")
+    print(f"volumes         : {len(rep.volumes)}")
+    for i, v in enumerate(rep.volumes):
+        print(f"  [{i}] @{v.offset:<12} {v.fs:<8} {v.detail}")
+        if v.fs not in ("unknown",):
+            print(f"       deleted directory entries recoverable: {v.deleted_files}")
+    if rep.sample_hits:
+        from .triage import fmt_size
+        kinds = ", ".join(f"{k}={n}" for k, n in sorted(rep.sample_hits.items()))
+        print(f"signature sample: {kinds} ({fmt_size(rep.sample_bytes)})")
+    print("\nRecommendations:")
+    for r in rep.recommendations:
+        print(f"  • {r}")
+    return 0
+
+
 def _cmd_acquire(args: argparse.Namespace) -> int:
     from . import acquire
 
@@ -234,6 +275,23 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--embed", action="store_true",
                    help="inline media into the gallery as data URIs (portable, larger)")
     f.set_defaults(func=_cmd_fs)
+
+    r = sub.add_parser("recover",
+                       help="full recovery: filesystem entries + carving in one pass")
+    r.add_argument("image", help="path to disk image, SD-card image, or /dev/sdX")
+    r.add_argument("-o", "--out", required=True, help="output directory")
+    r.add_argument("--min-size", type=int, default=512)
+    r.add_argument("--quiet", action="store_true", help="no progress bar")
+    r.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
+    r.add_argument("--embed", action="store_true",
+                   help="inline media into the gallery as data URIs (portable, larger)")
+    r.set_defaults(func=_cmd_recover)
+
+    i = sub.add_parser("info", help="triage an image/device (read-only); recommend an approach")
+    i.add_argument("image", help="path to disk image, SD-card image, or /dev/sdX")
+    i.add_argument("--sample-mb", type=int, default=256,
+                   help="how many leading MiB to sample for signatures (default 256)")
+    i.set_defaults(func=_cmd_info)
 
     a = sub.add_parser("acquire", help="pull media/thumbnails over ADB, or guide")
     a.add_argument("--pull", metavar="DIR", help="adb-pull media+thumbnails here")
