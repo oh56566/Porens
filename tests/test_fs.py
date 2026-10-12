@@ -125,6 +125,48 @@ def test_bpb_parser_rejects_garbage():
     assert exfat.parse_boot(b"\x00" * 512, 0) is None
 
 
+def _build_mbr(part_lba: int, num_sectors: int, ptype: int = 0x0C) -> bytes:
+    """A 512-byte MBR with one partition entry at ``part_lba``."""
+    mbr = bytearray(512)
+    e = 446
+    mbr[e + 4] = ptype  # 0x0C = FAT32 LBA
+    mbr[e + 8 : e + 12] = part_lba.to_bytes(4, "little")
+    mbr[e + 12 : e + 16] = num_sectors.to_bytes(4, "little")
+    mbr[510:512] = b"\x55\xaa"
+    return bytes(mbr)
+
+
+@pytest.mark.skipif(not HAVE_VFAT, reason="mkfs.vfat/mtools not available")
+def test_whole_disk_image_with_mbr(tmp_path):
+    """A dd of a whole card: MBR + a FAT partition at a byte offset."""
+    (pa, a), _ = _payloads(tmp_path)
+    vol = os.path.join(tmp_path, "vol.img")
+    subprocess.run(["truncate", "-s", "64M", vol], check=True)
+    subprocess.run(["mkfs.vfat", "-F", "32", vol],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["mcopy", "-i", vol, pa, "::/photo.jpg"], check=True)
+    subprocess.run(["mdel", "-i", vol, "::/photo.jpg"], check=True)
+
+    part_lba = 2048  # 1 MiB, the conventional first-partition offset
+    vol_bytes = open(vol, "rb").read()
+    disk = os.path.join(tmp_path, "disk.img")
+    with open(disk, "wb") as fh:
+        fh.write(_build_mbr(part_lba, len(vol_bytes) // 512))
+        fh.write(b"\x00" * (part_lba * 512 - 512))  # gap to the partition
+        fh.write(vol_bytes)
+
+    mm, size, read_at = _read_at_factory(disk)
+    try:
+        vols = mbr.find_volumes(read_at, size)
+        assert vols and vols[0].offset == part_lba * 512
+        params, files = fat.recover_volume(read_at, size, vols[0], deleted_only=True)
+        assert params is not None
+        contents = {bytes(fat.read_file_bytes(read_at, params, f)) for f in files}
+        assert a in contents
+    finally:
+        mm.close()
+
+
 @pytest.mark.skipif(not HAVE_VFAT, reason="mkfs.vfat/mtools not available")
 def test_recover_all_and_info(tmp_path):
     from porens.recover import recover_all
