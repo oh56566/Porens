@@ -167,6 +167,17 @@ def _cmd_recover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_gui(args: argparse.Namespace) -> int:
+    try:
+        from .gui import launch
+    except Exception as e:  # noqa: BLE001
+        print(f"Could not start the GUI: {e}", file=sys.stderr)
+        print("The desktop app needs Tkinter (bundled with standard Python). "
+              "On Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
+        return 1
+    return launch()
+
+
 def _cmd_info(args: argparse.Namespace) -> int:
     from .triage import inspect_image
 
@@ -312,6 +323,9 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--sample-mb", type=int, default=256,
                    help="how many leading MiB to sample for signatures (default 256)")
     i.set_defaults(func=_cmd_info)
+
+    g = sub.add_parser("gui", help="launch the desktop app (Tkinter)")
+    g.set_defaults(func=_cmd_gui)
 
     a = sub.add_parser("acquire", help="pull media/thumbnails over ADB, or guide")
     a.add_argument("--pull", metavar="DIR", help="adb-pull media+thumbnails here")

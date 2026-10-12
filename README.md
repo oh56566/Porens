@@ -65,7 +65,25 @@ Android **platform-tools** (`adb`) on your PATH.
 
 ---
 
-## Quick start
+## Desktop app
+
+Prefer a window to a command line? Porens ships a GUI (Tkinter, bundled with
+standard Python — no extra dependencies):
+
+```bash
+porens gui          # or:  python -m porens gui
+```
+
+Pick a source image/device, choose what to do (full recovery, deleted-file
+recovery, carving, thumbnails, or read-only triage), press **Run**, then open
+the HTML gallery or the output folder. Install `pillow` to enable the decode
+**Verify** option.
+
+To hand someone a **standalone application** with no Python at all, build one
+with PyInstaller — `./packaging/build.sh` produces `dist/Porens.exe`,
+`Porens.app`, or a Linux `Porens` binary. See [`packaging/`](packaging/).
+
+## Quick start (command line)
 
 ### 0. The short version
 
@@ -200,8 +218,11 @@ porens/
   recover.py      carve / fs / recover_all -> write, dedupe, collect metadata
   triage.py       read-only `info`: partitions, filesystems, recommendation
   report.py       JSON + CSV manifests + HTML gallery
+  validate_image.py  optional decode-verification (Pillow) for `--verify`
   acquire.py      ADB pull + dd imaging guidance (no rooting, no bypass)
-  cli.py          `porens recover | fs | carve | thumbnails | info | acquire`
+  gui.py          Tkinter desktop app (threaded over the engine)
+  cli.py          `porens recover|fs|carve|thumbnails|info|gui|acquire`
+packaging/        PyInstaller entry + build script for a standalone app
 ```
 
 Run the tests with `pytest`. They build real (synthetic) images, scatter them

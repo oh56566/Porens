@@ -23,8 +23,15 @@ dependencies = []
 [project.scripts]
 porens = "porens.cli:main"
 
+[project.gui-scripts]
+porens-gui = "porens.gui:launch"
+
 [project.optional-dependencies]
 test = ["pytest>=7"]
+# Decode-verification (--verify) and richer gallery previews.
+images = ["pillow>=10", "pillow-heif>=0.16"]
+# Build a standalone desktop app (see packaging/).
+build = ["pyinstaller>=6"]
 
 [tool.setuptools]
 packages = ["porens", "porens.formats", "porens.filesystems"]
