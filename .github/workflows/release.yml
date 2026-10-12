@@ -6,9 +6,19 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
 
 permissions:
   contents: write
+
+env:
+  # On a tag push this is the pushed tag; on manual dispatch it is the input.
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -78,6 +88,8 @@ jobs:
       - name: Publish to the release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Porens ${{ env.RELEASE_TAG }}
           body_path: RELEASE_NOTES.md
           files: release/${{ matrix.asset }}
           fail_on_unmatched_files: true
