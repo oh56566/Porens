@@ -47,6 +47,15 @@ def _run_job(op: str, source: str, out_dir: str, opts: dict, q: "queue.Queue") -
         def progress(done: int, total: int) -> None:
             q.put(("progress", (done / total) if total else 0.0))
 
+        # Folders only make sense for the thumbnails sweep; the other
+        # operations need a single image file or a device path.
+        if op in ("recover", "fs", "carve", "info") and os.path.isdir(source):
+            q.put(("error",
+                   "That source is a folder. Use the 'Android thumbnails' "
+                   "operation for a folder of pulled files, or choose a disk "
+                   "image file (.img/.dd) / device path for this operation."))
+            return
+
         if op == "info":
             from .triage import inspect_image
             log(f"Inspecting {source} …")
@@ -146,39 +155,55 @@ def launch() -> int:
               ).grid(row=0, column=1, columnspan=2, sticky="w", padx=(10, 0))
 
     # Source --------------------------------------------------------------
-    ttk.Label(main, text="Source image / device:").grid(row=1, column=0, sticky="w", pady=(14, 2))
+    ttk.Label(main, text="Source:").grid(row=1, column=0, sticky="w", pady=(14, 2))
     src_var = tk.StringVar()
     src_entry = ttk.Entry(main, textvariable=src_var)
     src_entry.grid(row=1, column=1, sticky="ew", pady=(14, 2))
 
-    def browse_src():
-        p = filedialog.askopenfilename(title="Select a disk/SD-card image")
+    def browse_file():
+        p = filedialog.askopenfilename(
+            title="Select a disk/SD-card image or a .thumbdata file")
         if p:
             src_var.set(p)
-    ttk.Button(main, text="Browse…", command=browse_src).grid(row=1, column=2, padx=(8, 0), pady=(14, 2))
+
+    def browse_folder():
+        p = filedialog.askdirectory(
+            title="Select a folder (e.g. an adb-pulled folder for thumbnails)")
+        if p:
+            src_var.set(p)
+
+    srcbtns = ttk.Frame(main)
+    srcbtns.grid(row=1, column=2, padx=(8, 0), pady=(14, 2), sticky="w")
+    ttk.Button(srcbtns, text="File…", width=7, command=browse_file).grid(row=0, column=0)
+    ttk.Button(srcbtns, text="Folder…", width=8, command=browse_folder).grid(row=0, column=1, padx=(4, 0))
+
+    ttk.Label(main, foreground="#888", font=("", 10),
+              text="an image file (.img/.dd), a folder (Thumbnails), "
+                   "or a device path you type (e.g. /dev/sdb, \\\\.\\PhysicalDrive1)."
+              ).grid(row=2, column=1, columnspan=2, sticky="w", pady=(0, 4))
 
     # Operation -----------------------------------------------------------
-    ttk.Label(main, text="Operation:").grid(row=2, column=0, sticky="w", pady=2)
+    ttk.Label(main, text="Operation:").grid(row=3, column=0, sticky="w", pady=2)
     op_var = tk.StringVar(value=OPERATIONS[0][0])
     op_combo = ttk.Combobox(main, textvariable=op_var, state="readonly",
                             values=[label for label, _ in OPERATIONS])
-    op_combo.grid(row=2, column=1, columnspan=2, sticky="ew", pady=2)
+    op_combo.grid(row=3, column=1, columnspan=2, sticky="ew", pady=2)
 
     # Output --------------------------------------------------------------
-    ttk.Label(main, text="Output folder:").grid(row=3, column=0, sticky="w", pady=2)
+    ttk.Label(main, text="Output folder:").grid(row=4, column=0, sticky="w", pady=2)
     out_var = tk.StringVar()
     out_entry = ttk.Entry(main, textvariable=out_var)
-    out_entry.grid(row=3, column=1, sticky="ew", pady=2)
+    out_entry.grid(row=4, column=1, sticky="ew", pady=2)
 
     def browse_out():
         p = filedialog.askdirectory(title="Select an output folder")
         if p:
             out_var.set(p)
-    ttk.Button(main, text="Browse…", command=browse_out).grid(row=3, column=2, padx=(8, 0), pady=2)
+    ttk.Button(main, text="Browse…", command=browse_out).grid(row=4, column=2, padx=(8, 0), pady=2)
 
     # Options -------------------------------------------------------------
     opt = ttk.LabelFrame(main, text="Options", padding=10)
-    opt.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12, 6))
+    opt.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(12, 6))
     dedupe_var = tk.BooleanVar(value=True)
     html_var = tk.BooleanVar(value=True)
     embed_var = tk.BooleanVar(value=False)
@@ -198,17 +223,17 @@ def launch() -> int:
 
     # Run + progress ------------------------------------------------------
     run_btn = ttk.Button(main, text="Run recovery")
-    run_btn.grid(row=5, column=0, sticky="w", pady=(4, 6))
+    run_btn.grid(row=6, column=0, sticky="w", pady=(4, 6))
     prog = ttk.Progressbar(main, mode="determinate", maximum=1.0)
-    prog.grid(row=5, column=1, columnspan=2, sticky="ew", pady=(4, 6), padx=(10, 0))
+    prog.grid(row=6, column=1, columnspan=2, sticky="ew", pady=(4, 6), padx=(10, 0))
     status_var = tk.StringVar(value="Ready.")
     ttk.Label(main, textvariable=status_var, foreground="#666").grid(
-        row=6, column=0, columnspan=3, sticky="w")
+        row=7, column=0, columnspan=3, sticky="w")
 
     # Log -----------------------------------------------------------------
     logframe = ttk.Frame(main)
-    logframe.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(6, 6))
-    main.rowconfigure(7, weight=1)
+    logframe.grid(row=8, column=0, columnspan=3, sticky="nsew", pady=(6, 6))
+    main.rowconfigure(8, weight=1)
     logframe.rowconfigure(0, weight=1)
     logframe.columnconfigure(0, weight=1)
     log_text = tk.Text(logframe, height=12, wrap="word", state="disabled",
@@ -220,7 +245,7 @@ def launch() -> int:
 
     # Result buttons ------------------------------------------------------
     resbar = ttk.Frame(main)
-    resbar.grid(row=8, column=0, columnspan=3, sticky="w")
+    resbar.grid(row=9, column=0, columnspan=3, sticky="w")
     open_gallery_btn = ttk.Button(resbar, text="Open gallery", state="disabled")
     open_gallery_btn.grid(row=0, column=0, padx=(0, 8))
     open_folder_btn = ttk.Button(resbar, text="Open output folder", state="disabled")
