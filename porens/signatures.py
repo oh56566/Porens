@@ -126,3 +126,66 @@ def kind_for_match(match: re.Match[bytes]) -> tuple[str, int]:
     kind = GROUP_KIND[gi]
     start = match.start() + GROUP_ADJUST[gi]
     return kind, max(start, 0)
+
+
+# --- Fast scanning via fixed-literal "needles" -----------------------------
+# A plain-regex scan of a 64 GB card in Python is far too slow: the engine
+# tests every offset. Instead we locate each format by a short *fixed*
+# literal with ``bytes.find`` (a C ``memmem``, which is orders of magnitude
+# faster on random data), then confirm the variable part with a validator.
+# A needle is (kind, literal, start_adjust, extra_tail), where extra_tail is
+# how many bytes past the literal the validator needs.
+
+
+class Needle:
+    __slots__ = ("kind", "literal", "adjust", "tail", "validate")
+
+    def __init__(self, kind, literal, adjust, tail, validate):
+        self.kind = kind
+        self.literal = literal
+        self.adjust = adjust
+        self.tail = tail
+        self.validate = validate
+
+
+def _v_jpeg(b: bytes) -> bool:
+    # b starts at the literal FFD8FF; byte 3 is the first real marker.
+    if len(b) < 4:
+        return False
+    m = b[3]
+    return 0xE0 <= m <= 0xEF or m in (0xDB, 0xEE, 0xC0, 0xC4)
+
+
+def _v_gif(b: bytes) -> bool:
+    return len(b) >= 6 and b[4] in (0x37, 0x39) and b[5] == 0x61
+
+
+def _v_webp(b: bytes) -> bool:
+    return len(b) >= 12 and b[8:12] == b"WEBP"
+
+
+def _v_ftyp(b: bytes) -> bool:
+    # b starts at the literal "ftyp"; the major brand follows it. The hit is
+    # reported 4 bytes earlier (adjust=-4) to include the box-size prefix.
+    if len(b) < 8:
+        return False
+    brand = b[4:8]
+    return all(0x20 <= c <= 0x7E for c in brand)
+
+
+def _v_true(b: bytes) -> bool:
+    return True
+
+
+NEEDLES: tuple[Needle, ...] = (
+    Needle("jpeg", b"\xff\xd8\xff", 0, 4, _v_jpeg),
+    Needle("png", b"\x89PNG\r\n\x1a\n", 0, 8, _v_true),
+    Needle("gif", b"GIF8", 0, 6, _v_gif),
+    Needle("webp", b"RIFF", 0, 12, _v_webp),
+    Needle("isobmff", b"ftyp", -4, 12, _v_ftyp),
+    Needle("tiff", b"II\x2a\x00", 0, 4, _v_true),
+    Needle("tiff", b"MM\x00\x2a", 0, 4, _v_true),
+)
+
+# Longest (literal length + tail reach) we must keep as window overlap.
+MAX_NEEDLE_REACH = max(len(n.literal) + n.tail + abs(n.adjust) for n in NEEDLES)

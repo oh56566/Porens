@@ -18,35 +18,31 @@ MAX_GIF = 128 * 1024 * 1024
 
 def carve_gif(buf: Buffer, start: int, limit: int) -> CarveResult | None:
     hard = min(limit, start + MAX_GIF)
-    w = bytes(buf[start:hard])
-    n = len(w)
-    if n < 13:
+    if start + 13 > hard:
         return None
-    pos = 6  # past "GIF8xa"
-    packed = w[10]
-    pos = 13
+    packed = buf[start + 10]
+    pos = start + 13
     if packed & 0x80:  # global color table present
-        gct = 3 * (1 << ((packed & 0x07) + 1))
-        pos += gct
-    while pos < n:
-        intro = w[pos]
+        pos += 3 * (1 << ((packed & 0x07) + 1))
+    while pos < hard:
+        intro = buf[pos]
         if intro == 0x3B:  # trailer
             return CarveResult(
-                kind="gif", start=start, end=start + pos + 1,
+                kind="gif", start=start, end=pos + 1,
                 confidence=0.9, ext="gif", notes=["trailer found"],
             )
         if intro == 0x21:  # extension
             pos += 2  # introducer + label
-            pos = _skip_subblocks(w, pos, n)
+            pos = _skip_subblocks(buf, pos, hard)
         elif intro == 0x2C:  # image descriptor
-            if pos + 10 > n:
+            if pos + 10 > hard:
                 break
-            lp = w[pos + 9]  # packed field of image descriptor
+            lp = buf[pos + 9]  # packed field of image descriptor
             pos += 10
             if lp & 0x80:  # local color table
                 pos += 3 * (1 << ((lp & 0x07) + 1))
             pos += 1  # LZW minimum code size
-            pos = _skip_subblocks(w, pos, n)
+            pos = _skip_subblocks(buf, pos, hard)
         else:
             break
         if pos < 0:
@@ -54,9 +50,9 @@ def carve_gif(buf: Buffer, start: int, limit: int) -> CarveResult | None:
     return None  # no trailer -> reject (GIF false positives are cheap to drop)
 
 
-def _skip_subblocks(w: bytes, pos: int, n: int) -> int:
-    while pos < n:
-        size = w[pos]
+def _skip_subblocks(buf: Buffer, pos: int, hard: int) -> int:
+    while pos < hard:
+        size = buf[pos]
         pos += 1
         if size == 0:  # block terminator
             return pos

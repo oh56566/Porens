@@ -20,13 +20,13 @@ from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from .formats import CARVERS, CarveResult
-from .signatures import COMBINED, kind_for_match
+from .signatures import MAX_NEEDLE_REACH, NEEDLES
 
 # Window for the signature scan. Carvers read past the window edge directly
 # from the mmap, so a file larger than the window is no problem.
 SCAN_WINDOW = 64 * 1024 * 1024
-# Longest signature is a handful of bytes; overlap generously.
-SCAN_OVERLAP = 64
+# Must exceed the furthest byte any needle+validator reads past its start.
+SCAN_OVERLAP = max(64, MAX_NEEDLE_REACH)
 
 ProgressFn = Callable[[int, int], None]  # (bytes_scanned, total)
 
@@ -80,10 +80,13 @@ def scan_signatures(
 ) -> Iterator[tuple[str, int]]:
     """Yield ``(kind, start_offset)`` for every signature hit, in order.
 
-    Hits are de-duplicated across window boundaries. ``kinds`` optionally
-    restricts which formats are reported.
+    Each format is located with a fixed-literal ``bytes.find`` (a C
+    ``memmem``) rather than a regex, then confirmed by its validator. Hits
+    within a window are sorted by offset and de-duplicated across window
+    boundaries. ``kinds`` optionally restricts which formats are reported.
     """
 
+    needles = [n for n in NEEDLES if kinds is None or n.kind in kinds]
     pos = 0
     last_yielded = -1
     size = src.size
@@ -91,15 +94,29 @@ def scan_signatures(
     while pos < size:
         end = min(pos + SCAN_WINDOW + SCAN_OVERLAP, size)
         window = mm[pos:end]
-        for m in COMBINED.finditer(window):
-            kind, rel_start = kind_for_match(m)
-            abs_start = pos + rel_start
-            if abs_start <= last_yielded:
-                continue  # already reported from the previous window overlap
-            if kinds is not None and kind not in kinds:
+        wlen = len(window)
+        hits: list[tuple[int, str]] = []
+        for n in needles:
+            lit = n.literal
+            i = window.find(lit)
+            while i != -1:
+                # Validate using bytes from the window (plus tail); the tail
+                # is covered by SCAN_OVERLAP except at end-of-file.
+                seg = window[i : i + len(lit) + n.tail]
+                if n.validate(seg):
+                    start = pos + i + n.adjust
+                    if start >= 0:
+                        hits.append((start, n.kind))
+                nxt = window.find(lit, i + 1)
+                if nxt == -1:
+                    break
+                i = nxt
+        hits.sort()
+        for start, kind in hits:
+            if start <= last_yielded:
                 continue
-            last_yielded = abs_start
-            yield kind, abs_start
+            last_yielded = start
+            yield kind, start
         if progress is not None:
             progress(min(end, size), size)
         pos += SCAN_WINDOW
