@@ -32,6 +32,7 @@ def _row(rec: Recovered) -> dict:
         "size": rec.size,
         "confidence": round(rec.confidence, 3),
         "truncated": rec.truncated,
+        "verified": rec.verified,
         "sha256": rec.sha256,
         "exif_timestamp": rec.exif.best_timestamp,
         "camera_make": rec.exif.make,
@@ -141,6 +142,11 @@ def _card(rec: Recovered, embed: bool = False) -> str:
     )
     cc = _conf_class(rec.confidence)
     trunc = '<span class="badge warn">partial</span>' if rec.truncated else ""
+    verified = ""
+    if rec.verified is True:
+        verified = '<span class="badge hi">decoded ✓</span>'
+    elif rec.verified is False:
+        verified = '<span class="badge warn">decode ✗</span>'
     data_attrs = (
         f'data-kind="{rec.kind}" data-source="{rec.source}" '
         f'data-conf="{rec.confidence}" data-size="{rec.size}" '
@@ -152,7 +158,7 @@ def _card(rec: Recovered, embed: bool = False) -> str:
     <div class="name" title="{title}">{title}</div>
     <div class="badges">
       <span class="badge {cc}">conf {rec.confidence:.2f}</span>
-      <span class="badge src">{html.escape(rec.source)}</span>{trunc}
+      <span class="badge src">{html.escape(rec.source)}</span>{verified}{trunc}
     </div>
     <div class="meta">{meta_html}</div>
     {gps}

@@ -38,6 +38,7 @@ class Recovered:
     source: str = "carve"            # "carve" | "fat" | "exfat"
     original_name: str | None = None  # filename from the directory entry
     fs_path: str | None = None        # directory path on the volume
+    verified: bool | None = None      # True/False from decode check, None=unchecked
 
 
 def _read_region(src: Source, res: CarveResult) -> bytes:
@@ -227,6 +228,29 @@ def recover_filesystem_to_dir(
                 )
                 index += 1
                 yield rec
+
+
+def verify_records(records: list[Recovered]) -> list[Recovered]:
+    """Decode-check each recovered image, recording the outcome in place.
+
+    A clean decode nudges confidence up; a failure caps it low and marks the
+    file truncated — the honest signal that the pixels are not all there.
+    No-ops (gracefully) when Pillow is unavailable.
+    """
+
+    from .validate_image import decode_check
+
+    for r in records:
+        ok, detail = decode_check(r.out_path, r.kind)
+        r.verified = ok
+        if ok is True:
+            r.notes.append(f"decoded ok ({detail})")
+            r.confidence = round(min(1.0, r.confidence + 0.05), 3)
+        elif ok is False:
+            r.notes.append(f"decode FAILED ({detail})")
+            r.confidence = round(min(r.confidence, 0.3), 3)
+            r.truncated = True
+    return records
 
 
 def recover_all(

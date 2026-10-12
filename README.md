@@ -139,6 +139,13 @@ confidence, truncation flag, SHA-256, original name/path (for `fs`), and
 named with their capture date when EXIF carries one, e.g.
 `000000_jpeg_20170821_134502.jpg`.
 
+Add `--verify` (any recovery command) to **decode-check** each recovered
+image when Pillow is installed: a file that renders is marked `decoded ✓`
+and nudged up in confidence; one that is structurally well-formed but will
+not decode (e.g. its middle was overwritten) is marked `decode ✗`, capped
+low, and flagged truncated. That is the honest answer to "is this close to
+the original?". Pillow is optional — without it, `--verify` is skipped.
+
 ---
 
 ## What makes the carving "close to the original"

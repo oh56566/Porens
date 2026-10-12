@@ -59,13 +59,25 @@ def _cmd_carve(args: argparse.Namespace) -> int:
         on_progress=progress,
     ):
         records.append(rec)
-    _finish(records, args.out, make_html=not args.no_html, title="Porens carve", embed=args.embed)
+    _finish(records, args.out, make_html=not args.no_html, title="Porens carve", embed=args.embed, verify=args.verify)
     return 0
 
 
 def _finish(records, out_dir: str, make_html: bool, title: str,
-            embed: bool = False) -> None:
+            embed: bool = False, verify: bool = False) -> None:
     from .report import write_html_gallery, write_manifest
+
+    if verify and records:
+        from .recover import verify_records
+        from .validate_image import pillow_available
+        if not pillow_available():
+            print("  (verify requested but Pillow is not installed — skipping)",
+                  file=sys.stderr)
+        else:
+            verify_records(records)
+            ok = sum(1 for r in records if r.verified is True)
+            bad = sum(1 for r in records if r.verified is False)
+            print(f"  verified      : {ok} decoded clean, {bad} failed to decode")
 
     stats = write_manifest(records, out_dir)
     _print_summary(stats)
@@ -108,7 +120,7 @@ def _cmd_thumbnails(args: argparse.Namespace) -> int:
     # Re-index sequentially across stores.
     for i, rec in enumerate(all_records):
         rec.index = i
-    _finish(all_records, args.out, make_html=not args.no_html, title="Porens thumbnails", embed=args.embed)
+    _finish(all_records, args.out, make_html=not args.no_html, title="Porens thumbnails", embed=args.embed, verify=args.verify)
     return 0
 
 
@@ -132,7 +144,7 @@ def _cmd_fs(args: argparse.Namespace) -> int:
         loc = f"{r.fs_path}/" if r.fs_path else ""
         print(f"  {r.source}: {loc}{r.original_name}  ({r.size} B, conf {r.confidence})",
               file=sys.stderr)
-    _finish(records, args.out, make_html=not args.no_html, title="Porens filesystem recovery", embed=args.embed)
+    _finish(records, args.out, make_html=not args.no_html, title="Porens filesystem recovery", embed=args.embed, verify=args.verify)
     return 0
 
 
@@ -148,7 +160,7 @@ def _cmd_recover(args: argparse.Namespace) -> int:
     for r in records:
         by_source[r.source] = by_source.get(r.source, 0) + 1
     _finish(records, args.out, make_html=not args.no_html,
-            title="Porens full recovery", embed=args.embed)
+            title="Porens full recovery", embed=args.embed, verify=args.verify)
     if by_source:
         print("  by source     : "
               + ", ".join(f"{k}={v}" for k, v in sorted(by_source.items())))
@@ -251,6 +263,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
     c.add_argument("--embed", action="store_true",
                    help="inline media into the gallery as data URIs (portable, larger)")
+    c.add_argument("--verify", action="store_true",
+                   help="decode-check recovered images (needs Pillow)")
     c.set_defaults(func=_cmd_carve)
 
     t = sub.add_parser("thumbnails",
@@ -262,6 +276,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
     t.add_argument("--embed", action="store_true",
                    help="inline media into the gallery as data URIs (portable, larger)")
+    t.add_argument("--verify", action="store_true",
+                   help="decode-check recovered images (needs Pillow)")
     t.set_defaults(func=_cmd_thumbnails)
 
     f = sub.add_parser("fs",
@@ -274,6 +290,8 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
     f.add_argument("--embed", action="store_true",
                    help="inline media into the gallery as data URIs (portable, larger)")
+    f.add_argument("--verify", action="store_true",
+                   help="decode-check recovered images (needs Pillow)")
     f.set_defaults(func=_cmd_fs)
 
     r = sub.add_parser("recover",
@@ -285,6 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-html", action="store_true", help="skip the HTML gallery")
     r.add_argument("--embed", action="store_true",
                    help="inline media into the gallery as data URIs (portable, larger)")
+    r.add_argument("--verify", action="store_true",
+                   help="decode-check recovered images (needs Pillow)")
     r.set_defaults(func=_cmd_recover)
 
     i = sub.add_parser("info", help="triage an image/device (read-only); recommend an approach")
