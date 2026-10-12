@@ -1,0 +1,83 @@
+name: release
+
+# Build standalone desktop-app binaries for each OS and publish them to a
+# GitHub Release whenever a version tag (v*) is pushed.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: Porens-linux-x86_64
+          - os: windows-latest
+            asset: Porens-windows-x86_64.exe
+          - os: macos-latest
+            asset: Porens-macos.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Linux: use the system Python + python3-tk in a venv, which
+      # reliably provides Tkinter (setup-python Linux builds sometimes omit
+      # the _tkinter module).
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv python3-tk tk
+          python3 -m venv venv
+          venv/bin/python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+          venv/bin/pip install --upgrade pip pyinstaller
+          venv/bin/pip install .
+          venv/bin/pyinstaller --noconfirm --onefile --name Porens \
+            --collect-submodules porens packaging/app_entry.py
+          mkdir -p release
+          cp dist/Porens "release/${{ matrix.asset }}"
+
+      # --- Windows/macOS: official python.org builds (via setup-python)
+      # include Tkinter.
+      - name: Set up Python
+        if: runner.os != 'Linux'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install .
+          pyinstaller --noconfirm --onefile --windowed --name Porens \
+            --collect-submodules porens packaging/app_entry.py
+          mkdir -p release
+          cp dist/Porens.exe "release/${{ matrix.asset }}"
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install .
+          pyinstaller --noconfirm --onefile --windowed --name Porens \
+            --collect-submodules porens packaging/app_entry.py
+          mkdir -p release
+          cd dist && zip -r "../release/${{ matrix.asset }}" Porens.app
+
+      - name: Publish to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: release/${{ matrix.asset }}
+          fail_on_unmatched_files: true
