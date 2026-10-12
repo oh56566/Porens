@@ -1,10 +1,18 @@
-# Porens v0.1.0
+# Porens v0.1.1
 
-Android media recovery & PC-side forensic file carving — first release.
+Android media recovery & PC-side forensic file carving.
 
 Recover deleted photos and videos from disk images, SD-card images, raw
 devices, and Android thumbnail stores, on your own PC, with the standard
 library alone.
+
+## What's new in v0.1.1
+
+- **Desktop app — Source now accepts a file, a folder, or a device.** The
+  Source row has separate **File…** and **Folder…** buttons (a folder is
+  what the Thumbnails operation needs), and you can type a device path such
+  as `/dev/sdb` or `\\.\PhysicalDrive1`. Choosing a folder for a non-thumbnail
+  operation now gives a clear message instead of a cryptic error.
 
 ## Highlights
 

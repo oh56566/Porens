@@ -7,6 +7,6 @@ Android user partitions — see the README for an honest treatment of what
 is and is not recoverable from a device such as the Galaxy S8.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = ["__version__"]
